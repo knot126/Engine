@@ -246,6 +246,9 @@ static DgError RoContextCreate_Main(RoContext * const this, DgVec2I size, void *
 		return DG_ERROR_FAILED;
 	}
 	
+	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+	glEnable(GL_BLEND);
+	
 	return DG_ERROR_SUCCESS;
 }
 
