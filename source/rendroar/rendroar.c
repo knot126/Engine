@@ -443,12 +443,12 @@ DgError RoDrawPlainVerts(RoContext * const this, size_t count, RoVertex *vertici
 
 DgError RoDrawQuad(RoContext * const this, DgVec2 top, DgVec2 bottom, const char *texture) {
 	RoVertex verts[] = {
-		(RoVertex) {bottom.x, top.y, 1.0, 0.0, 1.0, 255, 255, 255, 255},
-		(RoVertex) {bottom.x, bottom.y, 1.0, 0.0, 0.0, 255, 255, 255, 255},
-		(RoVertex) {top.x, top.y, 1.0, 1.0, 1.0, 255, 255, 255, 255},
-		(RoVertex) {top.x, bottom.y, 1.0, 1.0, 0.0, 255, 255, 255, 255},
-		(RoVertex) {bottom.x, bottom.y, 1.0, 0.0, 0.0, 255, 255, 255, 255},
-		(RoVertex) {top.x, top.y, 1.0, 1.0, 1.0, 255, 255, 255, 255},
+		(RoVertex) {bottom.x, top.y,    1.0, 1.0, 1.0, 255, 255, 255, 255},
+		(RoVertex) {bottom.x, bottom.y, 1.0, 1.0, 0.0, 255, 255, 255, 255},
+		(RoVertex) {top.x,    top.y,    1.0, 0.0, 1.0, 255, 255, 255, 255},
+		(RoVertex) {top.x,    bottom.y, 1.0, 0.0, 0.0, 255, 255, 255, 255},
+		(RoVertex) {bottom.x, bottom.y, 1.0, 1.0, 0.0, 255, 255, 255, 255},
+		(RoVertex) {top.x,    top.y,    1.0, 0.0, 1.0, 255, 255, 255, 255},
 	};
 	
 	return RoDrawVerts(this, 6, verts, texture);
