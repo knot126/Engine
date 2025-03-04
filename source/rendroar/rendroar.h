@@ -1,6 +1,7 @@
 #pragma once
 
 #include "util/maths.h"
+#include "util/window.h"
 #include "glad/egl.h"
 #ifndef GLAD_GLES2_IMPLEMENTATION
 	#include "glad/gles2.h"
@@ -54,10 +55,12 @@ typedef struct {
 } RoContext;
 
 DgError RoContextCreate(RoContext * const context, DgVec2I size);
-DgError RoContextCreateDW(RoContext * const this, void *display, void *window);
+DgError RoContextCreateFromNativeHandles(RoContext * const this, void *display, void *window);
+DgError RoContextCreateFromWindow(RoContext * const this, DgWindow *window);
 void RoContextDestroy(RoContext * const context);
 
-DgError RoUploadTexture(RoContext * const this, const char *name, RoFormat format, size_t width, size_t height, const void *pixels, RoTextureFlags flags);
+DgError RoUploadTextureRaw(RoContext * const this, const char *name, RoFormat format, size_t width, size_t height, const void *pixels, RoTextureFlags flags);
+DgError RoUploadTexture(RoContext *this, const char *name, DgTexture *texture, RoTextureFlags flags);
 
 DgError RoDrawBegin(RoContext * const this);
 DgError RoDrawEnd(RoContext * const this);
@@ -65,3 +68,4 @@ DgError RoGetFrameData(RoContext * const this, size_t size, void *data, bool alp
 
 DgError RoDrawVerts(RoContext * const this, size_t count, RoVertex *verticies, const char *texture);
 DgError RoDrawPlainVerts(RoContext * const this, size_t count, RoVertex *verticies);
+DgError RoDrawQuad(RoContext * const this, DgVec2 top, DgVec2 bottom, const char *texture);

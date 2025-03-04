@@ -6,7 +6,7 @@
 		],
 		"includes": ["source", "source/rendroar"],
 		"links": ["m", "pthread", "dl", "X11"],
-		"defines": ["DG_USE_X11", "MELON_CRYPTOGRAPHY_RANDOM"],
+		"defines": ["DG_ENABLE_X11", "MELON_CRYPTOGRAPHY_RANDOM"],
 		"output": "engine"
 	}
 }

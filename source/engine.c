@@ -11,17 +11,26 @@ Engine *gEngine;
 DgError EngineInit(Engine *this, DgArgs *args) {
 	DgInitTime();
 	
-	// DgStorageAddPool(NULL, DgFilesystemCreatePool(NULL, ""));
-	
 	AssetManagerInit(&this->assman);
 	AssetManagerSetSource(&this->assman, ASSET_SOURCE_FOLDER, "assets");
 	RegisterTextAssetTypeAndLoader(&this->assman);
 	
-	DgTableInit(&this->properties);
-	
 	DgWindowInit(&this->window, "New Engine", (DgVec2I) {1280, 720});
 	
-	RoContextCreateDW(&this->roc, DgWindowGetNativeDisplayHandle(&this->window), DgWindowGetNativeWindowHandle(&this->window));
+	RoContextCreateFromWindow(&this->roc, &this->window);
+	
+	DgTexture foxTexture;
+	bool succ = DgTextureLoadQOI(&foxTexture, "assets/vulpes.qoi");
+	// bool succ = DgTextureGenerateTiles(&foxTexture);
+	
+	if (!succ) {
+		DgLog(DG_LOG_ERROR, "foxy fail 3:");
+		return DG_ERROR_FAILED;
+	}
+	
+	RoUploadTexture(&this->roc, "fox", &foxTexture, 0);
+	
+	DgTextureFree(&foxTexture);
 	
 	this->frames = 0;
 	
@@ -41,24 +50,20 @@ DgError EngineRun(Engine *this) {
 	
 	EngineLoadMainScene(this);
 	
-	char pixels[] = {255, 255, 255, 0, 0, 0, 0, 0, 0, 255, 255, 255};
-	
-	RoUploadTexture(&this->roc, "swaping", RO_FORMAT_RGB, 2, 2, &pixels, 0);
-	
 	while (!DgWindowShouldClose(&this->window)) {
 		double start = DgTime();
 		
 		RoDrawBegin(&this->roc);
 		
-		float t = 2.0 * DgSin(0.25 * start);
+// 		float t = 2.0 * DgSin(0.25 * start);
+// 		
+// 		RoVertex verts[] = {
+// 			(RoVertex) {-0.5 * t,  0.5 * t, 1.0, 0.0, 0.0, 255, 0, 0, 255},
+// 			(RoVertex) { 0.5 * t,  0.5 * t, 1.0, 0.0, 1.0, 0, 255, 0, 255},
+// 			(RoVertex) { 0.0 * t, -0.5 * t, 1.0, 1.0, 0.0, 0, 0, 255, 255},
+// 		};
 		
-		RoVertex verts[] = {
-			(RoVertex) {-0.5 * t,  0.5 * t, 1.0, 0.0, 0.0, 255, 0, 0, 255},
-			(RoVertex) { 0.5 * t,  0.5 * t, 1.0, 0.0, 1.0, 0, 255, 0, 255},
-			(RoVertex) { 0.0 * t, -0.5 * t, 1.0, 1.0, 0.0, 0, 0, 255, 255},
-		};
-		
-		if ((err = RoDrawVerts(&this->roc, 3, verts, "swaping"))) {
+		if ((err = RoDrawQuad(&this->roc, (DgVec2){-1, -1}, (DgVec2){1, 1}, "fox"))) {
 			DgLog(DG_LOG_ERROR, "Error while adding verts: %s.", DgErrorString(err));
 		}
 		
@@ -66,9 +71,9 @@ DgError EngineRun(Engine *this) {
 			DgLog(DG_LOG_ERROR, "Error while finishing draw: %s.", DgErrorString(err));
 		}
 		
-		DgWindowStatus status = DgWindowUpdate(&this->window, NULL);
+		bool success = DgWindowUpdate(&this->window);
 		
-		if (status == DG_WINDOW_SHOULD_CLOSE) {
+		if (!success) {
 			break;
 		}
 		

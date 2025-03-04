@@ -253,8 +253,12 @@ DgError RoContextCreate(RoContext * const this, DgVec2I size) {
 	return RoContextCreate_Main(this, size, NULL, NULL);
 }
 
-DgError RoContextCreateDW(RoContext * const this, void *display, void *window) {
+DgError RoContextCreateFromNativeHandles(RoContext * const this, void *display, void *window) {
 	return RoContextCreate_Main(this, (DgVec2I) {0, 0}, display, window);
+}
+
+DgError RoContextCreateFromWindow(RoContext * const this, DgWindow *window) {
+	return RoContextCreate_Main(this, (DgVec2I) {0, 0}, DgWindowGetNativeDisplayHandleForEGL(window), DgWindowGetNativeWindowHandleForEGL(window));
 }
 
 static GLint RoUploadTextureInternal(RoFormat format, size_t width, size_t height, const void *pixels, RoTextureFlags flags) {
@@ -287,7 +291,7 @@ static GLint RoUploadTextureInternal(RoFormat format, size_t width, size_t heigh
 	return id;
 }
 
-DgError RoUploadTexture(RoContext * const this, const char *name, RoFormat format, size_t width, size_t height, const void *pixels, RoTextureFlags flags) {
+DgError RoUploadTextureRaw(RoContext * const this, const char *name, RoFormat format, size_t width, size_t height, const void *pixels, RoTextureFlags flags) {
 	/**
 	 * Upload a texture to the gpu
 	 */
@@ -301,6 +305,14 @@ DgError RoUploadTexture(RoContext * const this, const char *name, RoFormat forma
 	DgTablePut(&this->textures, &key, &val);
 	
 	return DG_ERROR_SUCCESS;
+}
+
+DgError RoUploadTexture(RoContext *this, const char *name, DgTexture *texture, RoTextureFlags flags) {
+	/**
+	 * Upload a copy of the loaded texture to the gpu
+	 */
+	
+	RoUploadTextureRaw(this, name, (texture->format == DG_TEXTURE_RGB) ? RO_FORMAT_RGB : RO_FORMAT_RGBA, texture->width, texture->height, texture->pixels, flags);
 }
 
 void RoContextDestroy(RoContext * const this) {
@@ -427,6 +439,19 @@ DgError RoDrawVerts(RoContext * const this, size_t count, RoVertex *verticies, c
 
 DgError RoDrawPlainVerts(RoContext * const this, size_t count, RoVertex *verticies) {
 	return RoDrawVerts(this, count, verticies, NULL);
+}
+
+DgError RoDrawQuad(RoContext * const this, DgVec2 top, DgVec2 bottom, const char *texture) {
+	RoVertex verts[] = {
+		(RoVertex) {bottom.x, top.y, 1.0, 0.0, 1.0, 255, 255, 255, 255},
+		(RoVertex) {bottom.x, bottom.y, 1.0, 0.0, 0.0, 255, 255, 255, 255},
+		(RoVertex) {top.x, top.y, 1.0, 1.0, 1.0, 255, 255, 255, 255},
+		(RoVertex) {top.x, bottom.y, 1.0, 1.0, 0.0, 255, 255, 255, 255},
+		(RoVertex) {bottom.x, bottom.y, 1.0, 0.0, 0.0, 255, 255, 255, 255},
+		(RoVertex) {top.x, top.y, 1.0, 1.0, 1.0, 255, 255, 255, 255},
+	};
+	
+	return RoDrawVerts(this, 6, verts, texture);
 }
 
 DgError RoDrawEnd(RoContext * const this) {
