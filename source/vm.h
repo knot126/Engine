@@ -8,20 +8,17 @@ typedef uint64_t object_id;
 // object for want of a better term. They are technically also primitives.
 // Their class IDs must fit in three bits and generally any class ID that can
 // fit in 3 or less bits is reserved for them.
-#define OCLS_ID     0b000
-#define OCLS_SINT   0b001
-#define OCLS_SSTR   0b010
-#define OCLS_FLOAT  0b011
-#define OCLS_BOOL   0b100
-#define OCLS_PRIM   0b101
+#define LE_OT_ID     0b000
+#define LE_OT_SINT   0b001
+#define LE_OT_SSTR   0b010
+#define LE_OT_FLOAT  0b011
+#define LE_OT_BOOL   0b100
+#define LE_OT_TYPE   0b111
 
-// Primitive object types are actually allocated, but don't follow the typical
-// object format. They are used for things like strings, integers and classes
-// which need some backing code in the implementation.
-// They are usually used in the type feild of an object e.g. the type feild is
-// set to something like MAKE_OBJID(OCLS_PRIM, OCLS_CLASS)
-#define OCLS_STRING 0b1000 // Object is a LongString
-#define OCLS_CLASS  0b1001 // Object is a Class
+// Primitive object types that are allocated, possibly even mutable, 
+#define LE_OT_ARRAY 0b1000
+#define LE_OT_DICT  0b1001
+#define LE_OT_STRING 0b1010
 
 #define GET_OBJID_CLS(x) (x >> 61)
 #define GET_OBJID_VAL(x) (x & 0x1fffffffffffffff)

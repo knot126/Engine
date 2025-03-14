@@ -69,3 +69,4 @@ DgError RoGetFrameData(RoContext * const this, size_t size, void *data, bool alp
 DgError RoDrawVerts(RoContext * const this, size_t count, RoVertex *verticies, const char *texture);
 DgError RoDrawPlainVerts(RoContext * const this, size_t count, RoVertex *verticies);
 DgError RoDrawQuad(RoContext * const this, DgVec2 top, DgVec2 bottom, const char *texture);
+DgError RoDrawRect(RoContext * const this, DgVec2 pos, DgVec2 size, const char *texture);

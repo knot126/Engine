@@ -457,6 +457,10 @@ DgError RoDrawQuad(RoContext * const this, DgVec2 top, DgVec2 bottom, const char
 	return RoDrawVerts(this, 6, verts, texture);
 }
 
+DgError RoDrawRect(RoContext * const this, DgVec2 pos, DgVec2 size, const char *texture) {
+	return RoDrawQuad(this, (DgVec2){pos.x - (0.5f * size.x), pos.y - (0.5f * size.y)}, (DgVec2){pos.x + (0.5f * size.x), pos.y + (0.5f * size.y)}, texture);
+}
+
 DgError RoDrawEnd(RoContext * const this) {
 	/**
 	 * Finish the drawing process and swap front and back buffers

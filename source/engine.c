@@ -53,6 +53,9 @@ DgError EngineRun(Engine *this) {
 	while (!DgWindowShouldClose(&this->window)) {
 		double start = DgTime();
 		
+		DgVec2I pos = DgWindowGetMouseLocation(&this->window);
+		DgVec2I wsize = DgWindowGetSize(&this->window);
+		
 		RoDrawBegin(&this->roc);
 		
 // 		float t = 2.0 * DgSin(0.25 * start);
@@ -63,7 +66,9 @@ DgError EngineRun(Engine *this) {
 // 			(RoVertex) { 0.0 * t, -0.5 * t, 1.0, 1.0, 0.0, 0, 0, 255, 255},
 // 		};
 		
-		if ((err = RoDrawQuad(&this->roc, (DgVec2){-1, -1}, (DgVec2){1, 1}, "fox"))) {
+		if ((err = RoDrawRect(&this->roc, 
+			(DgVec2){2.0 * (pos.x/(float)wsize.x) - 1.0, -2.0 * (pos.y/(float)wsize.y) + 1.0},
+			(DgVec2){0.5, 0.5 * ((float)wsize.x/(float)wsize.y)}, "fox"))) {
 			DgLog(DG_LOG_ERROR, "Error while adding verts: %s.", DgErrorString(err));
 		}
 		
