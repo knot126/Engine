@@ -4,13 +4,14 @@
 #include "assets.h"
 #include "util/table.h"
 #include "util/args.h"
-#include "rendroar/rendroar.h"
+#include "zinc/zinc.h"
 
 typedef struct Engine {
 	DgTable properties;
 	
 	DgWindow window;
-	RoContext roc;
+	ZnContext roc;
+	uint64_t fox;
 	
 	AssetManager assman;
 	

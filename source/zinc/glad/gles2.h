@@ -1862,7 +1862,7 @@ static GLADapiproc glad_dlsym_handle(void* handle, const char *name) {
   #include <EGL/egl.h>
   typedef __eglMustCastToProperFunctionPointerType (GLAD_API_PTR *PFNEGLGETPROCADDRESSPROC)(const char *name);
 #else
-  #include <glad/egl.h>
+  // #include <glad/egl.h>
 #endif
 
 

@@ -1,0 +1,43 @@
+#include "common.h"
+#include "vm.h"
+
+void *VMMemory(VM vm, void *block, size_t size) {
+	/**
+	 * Preform a memory operation
+	 */
+	
+	return vm->memory_func(vm->memory_context, block, size);
+}
+
+object_id Inc(VM vm, object_id object) {
+	if (IsPointer(object)) {
+		((ObjectHeader) GetPointer(object))->refs++;
+	}
+	
+	return object;
+}
+
+object_id Dec(VM vm, object_id object) {
+	if (!IsPointer(object)) {
+		return object;
+	}
+	
+	ObjectHeader h = GetPointer(object);
+	
+	h->refs--;
+	
+	if (h->refs <= 0) {
+		// free it!
+		return OID_NIL;
+	}
+	
+	return object;
+}
+
+void *New(VM vm, object_id type, size_t size) {
+	ObjectHeader h = DgAlloc(size);
+	memset(h, 0, size);
+	h->type = type;
+	h->refs = 1;
+	return h;
+}

@@ -1,88 +1,137 @@
-#include <common.h>
+#include "common.h"
 
 typedef void *vm_context;
 typedef uint64_t object_id;
+
+typedef enum : uint8_t {
+	VM_NOP, // nop
+	VM_CALL, // call function
+	VM_METHOD, // call method
+	VM_RET, // <nresults>
+	VM_LIT, // <literal id>
+	VM_CMP, // compare values
+	VM_CMPT, // truth(x) == True
+	VM_BR, // branch (possibly conditionally)
+	VM_POP, // pop top of stack
+	
+	VM_STORE, // Store global named variable
+	VM_LOAD, // Load global named variable
+	VM_STL, // Store global (literal name)
+	VM_LDL, // Load global (literal name)
+	
+	VM_COPY, // copy i-th element to top
+	
+	VM_NEG, // -a
+	VM_TRUTH, // !!a
+	VM_NOT, // !a
+	VM_BNOT, // ~a
+	VM_LEN, // len(a)
+	
+	VM_ADD, // b + a
+	VM_SUB, // b - a
+	VM_MUL, // b * a
+	VM_DIV, // b / a
+	VM_MOD, // b % a (b mod a)
+	VM_POW, // b ** a
+	VM_BOR, // b | a
+	VM_BAND, // b & a
+	VM_BXOR, // b ^ a
+	VM_SHL, // b << a
+	VM_SHR, // b >> a
+	VM_ROTL, // b <<< a
+	VM_ROTR, // b >>> a
+	VM_OR, // b or a
+	VM_AND, // b and a
+	VM_XOR, // b xor a
+	VM_ACS, // a.b
+} VMBytecode;
+
+/// PRIMITIVE TYPE IDS ///
 
 // The first level of "un-indirection": common small immutable objects have
 // their data stored in the object_id directly. This is called an "inline"
 // object for want of a better term. They are technically also primitives.
 // Their class IDs must fit in three bits and generally any class ID that can
 // fit in 3 or less bits is reserved for them.
-#define LE_OT_ID     0b000
-#define LE_OT_SINT   0b001
-#define LE_OT_SSTR   0b010
-#define LE_OT_FLOAT  0b011
-#define LE_OT_BOOL   0b100
-#define LE_OT_TYPE   0b111
+#define TID_OBJ    0b000
+#define TID_SINT   0b001
+#define TID_SSTR   0b010
+#define TID_FLOAT  0b011
+#define TID_BOOL   0b100
+#define TID_TYPE   0b111
 
-// Primitive object types that are allocated, possibly even mutable, 
-#define LE_OT_ARRAY 0b1000
-#define LE_OT_DICT  0b1001
-#define LE_OT_STRING 0b1010
+// Primitive object types that are allocated, possibly even mutable, get ids >= 8.
+#define TID_ARRAY 0b1000
+#define TID_DICT  0b1001
+#define TID_STRING 0b1010
+#define TID_FUNCTION 0b1011
+#define TID_NATIVE_FUNCTION 0b1100
 
-#define GET_OBJID_CLS(x) (x >> 61)
-#define GET_OBJID_VAL(x) (x & 0x1fffffffffffffff)
-#define MAKE_OBJID(t, v) ((t << 61) | (v & 0x1fffffffffffffff))
-#define OBJID_SEXT(x) ((int64_t)(((x >> 60) & 1) ? (0xe000000000000000 | x) : x))
+// Any other types don't have a type ID, they are objects with type set to
+// MakeID(TID_TYPE, TID_TYPE) or an object with that type.
 
-#define SSTR_SIZE(x) ((x >> 56) & 0b11111)
-#define MAKE_SSTR1(c0) MAKE_OBJID(OCLS_SSTR, (1 << 56) | c0)
-#define MAKE_SSTR2(c0, c1) MAKE_OBJID(OCLS_SSTR, (2 << 56) | (c1 << 8) | c0)
+/// HELPERS THAT ARE ACTUALLY MACROS ///
 
-#define RAW_CAST(t, v) (*(t *)(&(v)))
-#define OBJ_DOUBLE2ID(x) MAKE_OBJID(OCLS_FLOAT, RAW_CAST(uint64_t, x) >> 3)
-#define OBJ_ID2DOUBLE(x) RAW_CAST(double, x << 3)
+// Get the type ID and value of an object_id
+#define ClassOf(x) (x >> 61)
+#define ValueOf(x) (x & 0x1fffffffffffffff)
 
+// Make an object_id
+#define MakeID(t, v) ((t << 61) | (v & 0x1fffffffffffffff))
+
+// Sign extend object_id
+#define SignExtId(x) ((int64_t)(((x >> 60) & 1) ? (0xe000000000000000 | x) : x))
+
+// Get the size of a short string
+#define ShortStringSize(x) ((x >> 56) & 0b11111)
+
+// Convert between float object IDs and raw floats
+#define RawCast(t, v) (*(t *)(&(v)))
+#define FloatToId(x) MakeID(TID_FLOAT, RawCast(uint32_t, x))
+#define IdToFloat(x) RawCast(float, x)
+
+// Common object IDs
 #define OID_NIL 0
-#define OID_FALSE MAKE_OBJID(OCLS_BOOL, 0)
-#define OID_TRUE MAKE_OBJID(OCLS_BOOL, 1)
-#define OID_LONG_STRING MAKE_OBJID(OCLS_PRIM, 1) // Long string type
+#define OID_FALSE MakeID(TID_BOOL, 0)
+#define OID_TRUE MakeID(TID_BOOL, 1)
+#define OID_LONG_STRING_TYPE MakeID(TID_TYPE, TID_STRING) // Long string type
 
-#define IS_OBJ_FALSEY(x) (x == OID_NIL || x == OID_FALSE || x == MAKE_OBJID(OCLS_SINT, 0))
+// Test if an object ID is falsey, which in the VM is defined to be any object
+// which is nil, false or the integer 0.
+#define IsFalsey(x) (x == OID_NIL || x == OID_FALSE || x == MakeID(OCLS_SINT, 0))
 
-#define VMSTK_RESERVED 256
+// Pointer related functions
+#define IsPointer(x) (ClassOf(x) == TID_OBJ)
+#define GetPointer(x) ((void *)(LE_OVALUE(x) << 3))
+#define FromPointer(x) (MakeID(TID_OBJ, (uint64_t)(x >> 3)))
 
-typedef struct {
-	uint16_t top;
-	object_id data[VMSTK_RESERVED];
-} vm_stack;
-
-#define stk_pop(s) ((s)->top == 0 ? OID_NIL : (s)->data[--(s)->top])
+// Check the type of an object on the heap
+#define CheckType(x, T) (IsPointer(x) && ((ObjectHeader)GetPointer(x))->type == T)
 
 typedef struct {
 	object_id type;
 	size_t refs;
-} object_hd;
+} ObjectHeader_;
 
-// The object table efficently maps object IDs to object structure pointers
-typedef struct {
-	object_hd **objects;
-	size_t capacity;
-	size_t count;
-} object_table;
+typedef ObjectHeader_ *ObjectHeader;
 
-// Long strings are just strings. Just like shorts strings, they are immutable
-// and may contain embedded zeros.
-typedef struct {
-	object_hd header;
-	size_t length;
-	char data[0];
-} objt_string;
-
-// Dynamic arrays which efficently store object IDs
-typedef struct {
-	object_hd header;
-	size_t capacity;
-	size_t length;
-	object_id data[0];
-} objt_array;
+typedef void *(*VMAlloc)(void *context, void *block, size_t size);
+typedef void (*VMNativeFunction)(VM vm, VMArray args, VMArray rets);
 
 typedef struct {
-	object_hd header;
-	object_id feilds;
-} objt_class;
+	ObjectHeader_ header;
+	
+	// Memory management information
+	void *memory_context;
+	VMAlloc memory_func;
+	
+	// Globals
+	VMDict globals;
+} VM_;
 
-typedef struct {
-	object_hd header;
-	object_id *pairs;
-} objt_dict;
+typedef VM_ *VM;
+
+void *VMMemory(VM vm, void *block, size_t size);
+void *New(size_t size);
+object_id VMInc(object_id object);
+object_id VMDec(VM vm, object_id object);

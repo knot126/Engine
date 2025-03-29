@@ -5,16 +5,220 @@
 #include "glad/egl.h"
 #define GLAD_GLES2_IMPLEMENTATION
 #include "glad/gles2.h"
-#include "rendroar.h"
+#include "zinc.h"
 
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
 
-#include "ro_program.h"
+#include "shaders.h"
 
-const char *gRoDefaultShader = "varying vec2 fTextureCoords;\nvarying vec4 fColour;\n\n#ifdef VERTEX\nattribute vec3 inPosition;\nattribute vec2 inTextureCoords;\nattribute vec4 inColour;\n\nvoid main() {\n\tgl_Position = vec4(inPosition, 1.0);\n\tfTextureCoords = inTextureCoords;\n\tfColour = inColour;\n}\n#endif\n\n#ifdef FRAGMENT\nuniform sampler2D gTexture;\n\nvoid main() {\n\tgl_FragColor = fColour * texture2D(gTexture, fTextureCoords);\n}\n#endif\n";
+typedef struct ZnOpenGLProgram {
+	GLuint vertex, fragment, program;
+} ZnOpenGLProgram;
 
-static DgError RoContextCreate_InitGL(RoContext * const this, DgVec2I size, void *ndisplay, void *window) {
+static GLuint ZnOpenGLLoadShaderFromSource(GLenum type, const char *source) {
+	/**
+	 * Load a shader from source.
+	 * 
+	 * @param source Source of the shader to compile
+	 * @return shader handle on success, 0 on failure
+	 */
+	
+	GLuint shader;
+	GLint status;
+	
+	shader = glCreateShader(type);
+	
+	if (!shader) {
+		return 0;
+	}
+	
+	// We like to #define VERTEX or #define FRAGMENT based on the type
+	const char *source_real[] = {
+		"precision mediump float;\n",
+		(type == GL_VERTEX_SHADER) ? "#define VERTEX\n\n" : "#define FRAGMENT\n\n",
+		source,
+	};
+	
+	// DgLog(DG_LOG_VERBOSE, "--------\n%s%s%s--------\n", source_real[0], source_real[1], source_real[2]);
+	
+	glShaderSource(shader, 3, source_real, NULL);
+	
+	glCompileShader(shader);
+	
+	// Get the status
+	glGetShaderiv(shader, GL_COMPILE_STATUS, &status);
+	
+	if (!status) {
+		GLint error_length = 0;
+		
+		const char *source_real[] = {
+			"precision mediump float;\n",
+			(type == GL_VERTEX_SHADER) ? "#define VERTEX\n\n" : "#define FRAGMENT\n\n",
+			source,
+		};
+		
+		glShaderSource(shader, 3, source_real, NULL);
+		
+		glCompileShader(shader);
+		
+		// Get the status
+		glGetShaderiv(shader, GL_COMPILE_STATUS, &status);
+		
+		if (!status) {
+			glGetShaderiv(shader, GL_INFO_LOG_LENGTH, &error_length);
+			
+			if (error_length > 0) {
+				char *error = DgMemoryAllocate(error_length);
+				
+				if (!error) {
+					DgLog(DG_LOG_ERROR, "Error while displaying shader compilation error message.");
+					goto L_DeepError;
+				}
+				
+				glGetShaderInfoLog(shader, error_length, NULL, error);
+				
+				DgLog(DG_LOG_ERROR, "Failed to compile shader:\n%s", error);
+				
+				DgMemoryFree(error);
+			}
+			else {
+				DgLog(DG_LOG_ERROR, "Failed to compile shader but no log output was given.");
+			}
+		}
+		
+		L_DeepError:
+		glDeleteShader(shader);
+		
+		return 0;
+	}
+	
+	return shader;
+}
+
+static DgError ZnOpenGLProgramInit(ZnOpenGLProgram *this, const char *source) {
+	/**
+	 * Initialise a new program with it's source code
+	 */
+	
+	GLint status;
+	
+	this->vertex = ZnOpenGLLoadShaderFromSource(GL_VERTEX_SHADER, source);
+	this->fragment = ZnOpenGLLoadShaderFromSource(GL_FRAGMENT_SHADER, source);
+	
+	this->program = glCreateProgram();
+	
+	if (!this->program) {
+		return DG_ERROR_FAILED;
+	}
+	
+	glAttachShader(this->program, this->vertex);
+	glAttachShader(this->program, this->fragment);
+	
+	glLinkProgram(this->program);
+	
+	// Check status
+	glGetProgramiv(this->program, GL_LINK_STATUS, &status);
+	
+	if (!status) {
+		GLint error_length = 0;
+		
+		glGetProgramiv(this->program, GL_INFO_LOG_LENGTH, &error_length);
+		
+		if (error_length > 0) {
+			char *error = DgMemoryAllocate(error_length);
+			
+			if (!error) {
+				DgLog(DG_LOG_ERROR, "Error while displaying program link error message.");
+				goto L_DeepError;
+			}
+			
+			glGetProgramInfoLog(this->program, error_length, NULL, error);
+			
+			DgLog(DG_LOG_ERROR, "Failed to link program:\n%s", error);
+			
+			DgMemoryFree(error);
+		}
+		else {
+			DgLog(DG_LOG_ERROR, "Failed to link program but no log output was given.");
+		}
+		
+		L_DeepError:
+		glDeleteProgram(this->program);
+		
+		return 0;
+	}
+	
+	return DG_ERROR_SUCCESS;
+}
+
+static void ZnOpenGLProgramFree(ZnOpenGLProgram *this) {
+	glDeleteProgram(this->program);
+	glDeleteShader(this->vertex);
+	glDeleteShader(this->fragment);
+}
+
+static bool ZnOpenGLProgramSetGlobalInt(ZnOpenGLProgram *this, const char *name, GLint val) {
+	// Clear error
+	GLint err = glGetError();
+	if (err != GL_NO_ERROR) {
+		DgLog(DG_LOG_ERROR, "Not setting %s because of previous unhandled OpenGL error: <0x%x>", name, err);
+		return false;
+	}
+	
+	// Get uniform location
+	GLint location = glGetUniformLocation(this->program, name);
+	
+	err = glGetError();
+	if (err != GL_NO_ERROR) {
+		DgLog(DG_LOG_ERROR, "Failed to get uniform location for %s: <0x%x>", name, err);
+		return false;
+	}
+	
+	// Set it
+	glUseProgram(this->program);
+	glUniform1i(location, val);
+	
+	err = glGetError();
+	if (err != GL_NO_ERROR) {
+		DgLog(DG_LOG_ERROR, "Failed to set global integer %s to %d: <0x%x>", name, val, err);
+		return false;
+	}
+	
+	return true;
+}
+
+static bool ZnOpenGLProgramSetGlobalVec2f(ZnOpenGLProgram *this, const char *name, DgVec2 val) {
+	// Clear error
+	GLint err = glGetError();
+	if (err != GL_NO_ERROR) {
+		DgLog(DG_LOG_ERROR, "Not setting %s because of previous unhandled OpenGL error: <0x%x>", name, err);
+		return false;
+	}
+	
+	// Get uniform location
+	GLint location = glGetUniformLocation(this->program, name);
+	
+	err = glGetError();
+	if (err != GL_NO_ERROR) {
+		DgLog(DG_LOG_ERROR, "Failed to get uniform location for %s: <0x%x>", name, err);
+		return false;
+	}
+	
+	// Set it
+	glUseProgram(this->program);
+	glUniform2f(location, val.x, val.y);
+	
+	err = glGetError();
+	if (err != GL_NO_ERROR) {
+		DgLog(DG_LOG_ERROR, "Failed to set global integer %s to %d: <0x%x>", name, val, err);
+		return false;
+	}
+	
+	return true;
+}
+
+static DgError ZnContextCreate_InitGL(ZnContext * const this, DgVec2I size, void *ndisplay, void *window) {
 	/**
 	 * Initialise OpenGL for the new context
 	 * 
@@ -42,7 +246,7 @@ static DgError RoContextCreate_InitGL(RoContext * const this, DgVec2I size, void
 	}
 	
 	if (ndisplay) {
-		this->flags |= RO_CONTEXT_FLAG_EXTERNAL_DISPLAY;
+		this->flags |= ZN_CONTEXT_FLAG_EXTERNAL_DISPLAY;
 	}
 	
 	this->display = display;
@@ -172,13 +376,12 @@ static DgError RoContextCreate_InitGL(RoContext * const this, DgVec2I size, void
 	return DG_ERROR_SUCCESS;
 }
 
-static GLint RoUploadTextureInternal(RoFormat format, size_t width, size_t height, const void *pixels, RoTextureFlags flags);
-static GLuint RoLookupTextureId(RoContext *this, const char *name);
+static GLint ZnCreateOpenGLTexture(ZnFormat format, size_t width, size_t height, const void *pixels, ZnTextureFlags flags);
 
-static DgError RoUploadDefaultTexture(RoContext * const this) {
+static DgError ZnUploadDefaultTexture(ZnContext * const this) {
 	char data[3] = {255, 255, 255};
 	
-	this->default_texture_id = RoUploadTextureInternal(RO_FORMAT_RGB, 1, 1, &data, 0);
+	this->default_texture_id = ZnCreateOpenGLTexture(ZN_FORMAT_RGB, 1, 1, &data, 0);
 	
 	if (this->default_texture_id < 0) {
 		return DG_ERROR_FAILED;
@@ -187,7 +390,7 @@ static DgError RoUploadDefaultTexture(RoContext * const this) {
 	return DG_ERROR_SUCCESS;
 }
 
-static DgError RoContextCreate_Main(RoContext * const this, DgVec2I size, void *display, void *window) {
+static DgError ZnContextCreate_Main(ZnContext * const this, DgVec2I size, void *display, void *window) {
 	/**
 	 * Create a new context
 	 * 
@@ -197,14 +400,14 @@ static DgError RoContextCreate_Main(RoContext * const this, DgVec2I size, void *
 	 * @return Error code while initialising
 	 */
 	
-	DgError status = RoContextCreate_InitGL(this, size, display, window);
+	DgError status = ZnContextCreate_InitGL(this, size, display, window);
 	
 	if (status) {
 		DgRaise("GLInitError", "Failed to initialise OpenGL");
 		return status;
 	}
 	
-	status = RoUploadDefaultTexture(this);
+	status = ZnUploadDefaultTexture(this);
 	
 	if (status) {
 		DgRaise("TextureUploadError", "Could not upload default texture to gpu");
@@ -217,7 +420,7 @@ static DgError RoContextCreate_Main(RoContext * const this, DgVec2I size, void *
 		return DG_ERROR_ALLOCATION_FAILED;
 	}
 	
-	status = RoOpenGLProgramInit(this->program, gRoDefaultShader);
+	status = ZnOpenGLProgramInit(this->program, shader_basicTexturedColoured2D_glsl);
 	
 	if (status) {
 		DgLog(DG_LOG_ERROR, "Failed to initialise program, status <0x%x>.", status);
@@ -225,9 +428,7 @@ static DgError RoContextCreate_Main(RoContext * const this, DgVec2I size, void *
 		return status;
 	}
 	
-	status = RoOpenGLProgramSetGlobalInt(this->program, "gTexture", 0);
-	
-	if (status) {
+	if (!ZnOpenGLProgramSetGlobalInt(this->program, "gTexture", 0)) {
 		DgRaise("GLProgramError", "Failed to set gTexture");
 		return status;
 	}
@@ -252,19 +453,19 @@ static DgError RoContextCreate_Main(RoContext * const this, DgVec2I size, void *
 	return DG_ERROR_SUCCESS;
 }
 
-DgError RoContextCreate(RoContext * const this, DgVec2I size) {
-	return RoContextCreate_Main(this, size, NULL, NULL);
+DgError ZnContextCreate(ZnContext * const this, DgVec2I size) {
+	return ZnContextCreate_Main(this, size, NULL, NULL);
 }
 
-DgError RoContextCreateFromNativeHandles(RoContext * const this, void *display, void *window) {
-	return RoContextCreate_Main(this, (DgVec2I) {0, 0}, display, window);
+DgError ZnContextCreateFromNativeHandles(ZnContext * const this, void *display, void *window) {
+	return ZnContextCreate_Main(this, (DgVec2I) {0, 0}, display, window);
 }
 
-DgError RoContextCreateFromWindow(RoContext * const this, DgWindow *window) {
-	return RoContextCreate_Main(this, (DgVec2I) {0, 0}, DgWindowGetNativeDisplayHandleForEGL(window), DgWindowGetNativeWindowHandleForEGL(window));
+DgError ZnContextCreateFromWindow(ZnContext * const this, DgWindow *window) {
+	return ZnContextCreate_Main(this, (DgVec2I) {0, 0}, DgWindowGetNativeDisplayHandleForEGL(window), DgWindowGetNativeWindowHandleForEGL(window));
 }
 
-static GLint RoUploadTextureInternal(RoFormat format, size_t width, size_t height, const void *pixels, RoTextureFlags flags) {
+static GLint ZnCreateOpenGLTexture(ZnFormat format, size_t width, size_t height, const void *pixels, ZnTextureFlags flags) {
 	GLuint id;
 	
 	// Set unpack alignment to 1 if RGB or 4 if RGBA
@@ -278,12 +479,12 @@ static GLint RoUploadTextureInternal(RoFormat format, size_t width, size_t heigh
 	glTexImage2D(GL_TEXTURE_2D, 0, format, width, height, 0, format, GL_UNSIGNED_BYTE, pixels);
 	
 	// Use bilinear interpolation for normal textures, nearest for pixel art
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, (flags & RO_PIXEL_ART) ? GL_NEAREST : GL_LINEAR);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, (flags & RO_PIXEL_ART) ? GL_NEAREST : GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, (flags & ZN_PIXEL_ART) ? GL_NEAREST : GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, (flags & ZN_PIXEL_ART) ? GL_NEAREST : GL_LINEAR);
 	
 	// Set clamp to edge by default or repeat texture if requested
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, (flags & RO_TEXTURE_REPEAT) ? GL_REPEAT : GL_CLAMP_TO_EDGE);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, (flags & RO_TEXTURE_REPEAT) ? GL_REPEAT : GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, (flags & ZN_TEXTURE_REPEAT) ? GL_REPEAT : GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, (flags & ZN_TEXTURE_REPEAT) ? GL_REPEAT : GL_CLAMP_TO_EDGE);
 	
 	GLenum gl_error = glGetError();
 	
@@ -294,31 +495,23 @@ static GLint RoUploadTextureInternal(RoFormat format, size_t width, size_t heigh
 	return id;
 }
 
-DgError RoUploadTextureRaw(RoContext * const this, const char *name, RoFormat format, size_t width, size_t height, const void *pixels, RoTextureFlags flags) {
+static uint64_t ZnUploadTextureRaw(ZnContext * const this, ZnFormat format, size_t width, size_t height, const void *pixels, ZnTextureFlags flags) {
 	/**
 	 * Upload a texture to the gpu
 	 */
 	
-	GLint id = RoUploadTextureInternal(format, width, height, pixels, flags);
-	
-	// Store in map
-	DgValue key = DgMakeString(name);
-	DgValue val = DgMakeInt32(id);
-	
-	DgTablePut(&this->textures, &key, &val);
-	
-	return DG_ERROR_SUCCESS;
+	return ZnCreateOpenGLTexture(format, width, height, pixels, flags) + 1;
 }
 
-DgError RoUploadTexture(RoContext *this, const char *name, DgTexture *texture, RoTextureFlags flags) {
+uint64_t ZnUploadTexture(ZnContext *this, DgTexture *texture, ZnTextureFlags flags) {
 	/**
 	 * Upload a copy of the loaded texture to the gpu
 	 */
 	
-	RoUploadTextureRaw(this, name, (texture->format == DG_TEXTURE_RGB) ? RO_FORMAT_RGB : RO_FORMAT_RGBA, texture->width, texture->height, texture->pixels, flags);
+	return ZnUploadTextureRaw(this, (texture->format == DG_TEXTURE_RGB) ? ZN_FORMAT_RGB : ZN_FORMAT_RGBA, texture->width, texture->height, texture->pixels, flags);
 }
 
-void RoContextDestroy(RoContext * const this) {
+void ZnContextDestroy(ZnContext * const this) {
 	/**
 	 * Destroy the context
 	 */
@@ -327,7 +520,7 @@ void RoContextDestroy(RoContext * const this) {
 	glDeleteTextures(1, &this->default_texture_id);
 	
 	// Delete program
-	RoOpenGLProgramFree(this->program);
+	ZnOpenGLProgramFree(this->program);
 	DgMemoryFree(this->program);
 	
 	// Unload GLES
@@ -341,26 +534,19 @@ void RoContextDestroy(RoContext * const this) {
 	gladLoaderUnloadEGL();
 	
 	// Destory builtin display
-	if (!(this->flags & RO_CONTEXT_FLAG_EXTERNAL_DISPLAY)) {
+	if (!(this->flags & ZN_CONTEXT_FLAG_EXTERNAL_DISPLAY)) {
 		DgLog(DG_LOG_INFO, "Rendroar is destroying X display...");
 		XCloseDisplay(this->display);
 	}
 }
 
-static DgError RoSetTextureAsCurrentFromID(GLuint id) {
+static DgError ZnSetTextureAsCurrentFromID(GLuint id) {
 	glActiveTexture(GL_TEXTURE0);
 	glBindTexture(GL_TEXTURE_2D, id);
 	return DG_ERROR_SUCCESS;
 }
 
-static GLuint RoLookupTextureId(RoContext *this, const char *name) {
-	DgValue key = DgMakeStaticString(name);
-	DgValue *val = DgTableAt(&this->textures, &key);
-	
-	return val ? val->data.asInt32 : 0;
-}
-
-static void RoContextMakeCurrent(RoContext *this) {
+static void ZnContextMakeCurrent(ZnContext *this) {
 	eglMakeCurrent(this->egl_display, this->egl_surface, this->egl_surface, this->egl_context);
 	
 	EGLint egl_error;
@@ -370,7 +556,7 @@ static void RoContextMakeCurrent(RoContext *this) {
 	}
 }
 
-static GLint RoUseVertexAttrib(GLint program, const char *name, GLint size, GLenum type, GLboolean normalise, GLsizei stride, const void *pointer) {
+static GLint ZnUseVertexAttrib(GLint program, const char *name, GLint size, GLenum type, GLboolean normalise, GLsizei stride, const void *pointer) {
 	GLint location = glGetAttribLocation(program, name);
 	
 	if (location >= 0) {
@@ -391,7 +577,7 @@ static GLint RoUseVertexAttrib(GLint program, const char *name, GLint size, GLen
 	return location;
 }
 
-DgError RoDrawBegin(RoContext * const this) {
+DgError ZnDrawBegin(ZnContext * const this) {
 	/**
 	 * Start the drawing process
 	 * 
@@ -404,13 +590,13 @@ DgError RoDrawBegin(RoContext * const this) {
 }
 
 enum {
-	RO_CMD_STOP,
-	RO_CMD_DRAW_TRIS,
-	RO_CMD_SET_TEXTURE,
-	RO_CMD_CLEAR_TEXTURE,
+	ZN_CMD_STOP,
+	ZN_CMD_DRAW_TRIS,
+	ZN_CMD_SET_TEXTURE,
+	ZN_CMD_CLEAR_TEXTURE,
 };
 
-DgError RoDrawVerts(RoContext * const this, size_t count, RoVertex *verticies, const char *texture) {
+DgError ZnDrawVerts(ZnContext * const this, size_t count, ZnVertex *verticies, uint64_t texture) {
 	/**
 	 * Draw textured verticies to the screen
 	 * 
@@ -422,14 +608,14 @@ DgError RoDrawVerts(RoContext * const this, size_t count, RoVertex *verticies, c
 	 */
 	
 	if (texture) {
-		DgMemoryStreamWriteUInt32(this->buffer, RO_CMD_SET_TEXTURE);
-		DgMemoryStreamWriteInt32(this->buffer, RoLookupTextureId(this, texture));
+		DgMemoryStreamWriteUInt32(this->buffer, ZN_CMD_SET_TEXTURE);
+		DgMemoryStreamWriteInt32(this->buffer, texture - 1);
 	}
 	else {
-		DgMemoryStreamWriteUInt32(this->buffer, RO_CMD_CLEAR_TEXTURE);
+		DgMemoryStreamWriteUInt32(this->buffer, ZN_CMD_CLEAR_TEXTURE);
 	}
 	
-	DgMemoryStreamWriteUInt32(this->buffer, RO_CMD_DRAW_TRIS);
+	DgMemoryStreamWriteUInt32(this->buffer, ZN_CMD_DRAW_TRIS);
 	DgMemoryStreamWriteUInt32(this->buffer, count);
 	DgMemoryStreamWrite(this->buffer, sizeof *verticies * count, verticies);
 	
@@ -440,28 +626,28 @@ DgError RoDrawVerts(RoContext * const this, size_t count, RoVertex *verticies, c
 	return DG_ERROR_SUCCESS;
 }
 
-DgError RoDrawPlainVerts(RoContext * const this, size_t count, RoVertex *verticies) {
-	return RoDrawVerts(this, count, verticies, NULL);
+DgError ZnDrawPlainVerts(ZnContext * const this, size_t count, ZnVertex *verticies) {
+	return ZnDrawVerts(this, count, verticies, 0);
 }
 
-DgError RoDrawQuad(RoContext * const this, DgVec2 top, DgVec2 bottom, const char *texture) {
-	RoVertex verts[] = {
-		(RoVertex) {bottom.x, top.y,    1.0, 1.0, 1.0, 255, 255, 255, 255},
-		(RoVertex) {bottom.x, bottom.y, 1.0, 1.0, 0.0, 255, 255, 255, 255},
-		(RoVertex) {top.x,    top.y,    1.0, 0.0, 1.0, 255, 255, 255, 255},
-		(RoVertex) {top.x,    bottom.y, 1.0, 0.0, 0.0, 255, 255, 255, 255},
-		(RoVertex) {bottom.x, bottom.y, 1.0, 1.0, 0.0, 255, 255, 255, 255},
-		(RoVertex) {top.x,    top.y,    1.0, 0.0, 1.0, 255, 255, 255, 255},
+DgError ZnDrawQuad(ZnContext * const this, DgVec2 top, DgVec2 bottom, uint64_t texture) {
+	ZnVertex verts[] = {
+		(ZnVertex) {bottom.x, top.y,    1.0, 1.0, 1.0, 255, 255, 255, 255},
+		(ZnVertex) {bottom.x, bottom.y, 1.0, 1.0, 0.0, 255, 255, 255, 255},
+		(ZnVertex) {top.x,    top.y,    1.0, 0.0, 1.0, 255, 255, 255, 255},
+		(ZnVertex) {top.x,    bottom.y, 1.0, 0.0, 0.0, 255, 255, 255, 255},
+		(ZnVertex) {bottom.x, bottom.y, 1.0, 1.0, 0.0, 255, 255, 255, 255},
+		(ZnVertex) {top.x,    top.y,    1.0, 0.0, 1.0, 255, 255, 255, 255},
 	};
 	
-	return RoDrawVerts(this, 6, verts, texture);
+	return ZnDrawVerts(this, 6, verts, texture);
 }
 
-DgError RoDrawRect(RoContext * const this, DgVec2 pos, DgVec2 size, const char *texture) {
-	return RoDrawQuad(this, (DgVec2){pos.x - (0.5f * size.x), pos.y - (0.5f * size.y)}, (DgVec2){pos.x + (0.5f * size.x), pos.y + (0.5f * size.y)}, texture);
+DgError ZnDrawRect(ZnContext * const this, DgVec2 pos, DgVec2 size, uint64_t texture) {
+	return ZnDrawQuad(this, (DgVec2){pos.x - (0.5f * size.x), pos.y - (0.5f * size.y)}, (DgVec2){pos.x + (0.5f * size.x), pos.y + (0.5f * size.y)}, texture);
 }
 
-DgError RoDrawEnd(RoContext * const this) {
+DgError ZnDrawEnd(ZnContext * const this) {
 	/**
 	 * Finish the drawing process and swap front and back buffers
 	 */
@@ -474,10 +660,10 @@ DgError RoDrawEnd(RoContext * const this) {
 	}
 	
 	// finish off buffer
-	DgMemoryStreamWriteUInt32(this->buffer, RO_CMD_STOP);
+	DgMemoryStreamWriteUInt32(this->buffer, ZN_CMD_STOP);
 	DgMemoryStreamRewind(this->buffer);
 	
-	RoContextMakeCurrent(this);
+	ZnContextMakeCurrent(this);
 	
 	// Update the viewport
 	EGLint width, height;
@@ -485,6 +671,9 @@ DgError RoDrawEnd(RoContext * const this) {
 	eglQuerySurface(this->egl_display, this->egl_surface, EGL_HEIGHT, &height);
 	
 	glViewport(0, 0, width, height);
+	
+	// Update screen size in shader
+	ZnOpenGLProgramSetGlobalVec2f(this->program, "gScreenSize", (DgVec2){width, height});
 	
 	// Clear the screen
 	glClearColor(this->background.r, this->background.g, this->background.b, this->background.a);
@@ -500,75 +689,64 @@ DgError RoDrawEnd(RoContext * const this) {
 		uint32_t cmd = DgMemoryStreamReadUInt32(this->buffer);
 		
 		switch (cmd) {
-			case RO_CMD_STOP: {
-				DgLog(DG_LOG_VERBOSE, "Drawing.Stop");
+			case ZN_CMD_STOP: {
+				// DgLog(DG_LOG_VERBOSE, "Drawing.Stop");
 				drawing = false;
 				break;
 			}
 			
-			case RO_CMD_SET_TEXTURE: {
+			case ZN_CMD_SET_TEXTURE: {
 				GLint id = DgMemoryStreamReadInt32(this->buffer);
-				DgLog(DG_LOG_VERBOSE, "Drawing.SetTexture %d", id);
-				RoSetTextureAsCurrentFromID(id);
+				// DgLog(DG_LOG_VERBOSE, "Drawing.SetTexture %d", id);
+				ZnSetTextureAsCurrentFromID(id);
 				break;
 			}
 			
-			case RO_CMD_CLEAR_TEXTURE: {
-				DgLog(DG_LOG_VERBOSE, "Drawing.ClearTexture");
+			case ZN_CMD_CLEAR_TEXTURE: {
+				// DgLog(DG_LOG_VERBOSE, "Drawing.ClearTexture");
 				glActiveTexture(GL_TEXTURE0);
 				glBindTexture(GL_TEXTURE_2D, this->default_texture_id);
 				break;
 			}
 			
-			case RO_CMD_DRAW_TRIS: {
-// 				glValidateProgram(program);
-// 				GLint status;
-// 				glGetProgramiv(program, GL_VALIDATE_STATUS, &status);
-// 				
-// 				if (status != GL_TRUE) {
-// 					DgLog(DG_LOG_WARNING, "Program validation failed!");
-// 					char log[2048];
-// 					glGetProgramInfoLog(program, sizeof(log), NULL, log);
-// 					DgLog(DG_LOG_WARNING, "%s", log);
-// 				}
-				
+			case ZN_CMD_DRAW_TRIS: {
 				size_t vertex_count = DgMemoryStreamReadUInt32(this->buffer);
-				RoVertex *data = DgMemoryStreamGetHeadPointer(this->buffer);
-				DgMemoryStreamSetpos(this->buffer, DG_MEMORY_STREAM_CUR, sizeof(RoVertex) * vertex_count);
+				ZnVertex *data = DgMemoryStreamGetHeadPointer(this->buffer);
+				DgMemoryStreamSetpos(this->buffer, DG_MEMORY_STREAM_CUR, sizeof(ZnVertex) * vertex_count);
 				
-				DgLog(DG_LOG_VERBOSE, "Drawing.DrawTris %zu <@ 0x%llx>", vertex_count, data);
+				// DgLog(DG_LOG_VERBOSE, "Drawing.DrawTris %zu <@ 0x%llx>", vertex_count, data);
 				
-				for (size_t i = 0; i < vertex_count; i++) {
-					DgLog(DG_LOG_VERBOSE, "%f %f %f   %f %f   %d %d %d %d", data[i].x, data[i].y, data[i].z, data[i].u, data[i].v, data[i].r, data[i].g, data[i].b, data[i].a);
-				}
+				// for (size_t i = 0; i < vertex_count; i++) {
+				// 	DgLog(DG_LOG_VERBOSE, "%f %f %f   %f %f   %d %d %d %d", data[i].x, data[i].y, data[i].z, data[i].u, data[i].v, data[i].r, data[i].g, data[i].b, data[i].a);
+				// }
 				
-				GLint inPosition = RoUseVertexAttrib(
+				GLint inPosition = ZnUseVertexAttrib(
 					program,
 					"inPosition",
 					3,
 					GL_FLOAT,
 					GL_FALSE,
-					sizeof(RoVertex),
+					sizeof(ZnVertex),
 					&data[0].x
 				);
 				
-				GLint inTextureCoords = RoUseVertexAttrib(
+				GLint inTextureCoords = ZnUseVertexAttrib(
 					program,
 					"inTextureCoords",
 					2,
 					GL_FLOAT,
 					GL_FALSE,
-					sizeof(RoVertex),
+					sizeof(ZnVertex),
 					&data[0].u
 				);
 				
-				GLint inColour = RoUseVertexAttrib(
+				GLint inColour = ZnUseVertexAttrib(
 					program,
 					"inColour",
 					4,
 					GL_UNSIGNED_BYTE,
 					GL_TRUE,
-					sizeof(RoVertex),
+					sizeof(ZnVertex),
 					&data[0].r
 				);
 				
@@ -611,7 +789,7 @@ DgError RoDrawEnd(RoContext * const this) {
 	return DG_ERROR_SUCCESS;
 }
 
-DgError RoGetFrameData(RoContext * const this, size_t size, void *data, bool alpha) {
+DgError ZnGetFrameData(ZnContext * const this, size_t size, void *data, bool alpha) {
 	/**
 	 * Get the data for the front frame
 	 * 

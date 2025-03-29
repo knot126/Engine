@@ -17,18 +17,22 @@ DgError EngineInit(Engine *this, DgArgs *args) {
 	
 	DgWindowInit(&this->window, "New Engine", (DgVec2I) {1280, 720});
 	
-	RoContextCreateFromWindow(&this->roc, &this->window);
+	ZnContextCreateFromWindow(&this->roc, &this->window);
 	
 	DgTexture foxTexture;
 	bool succ = DgTextureLoadQOI(&foxTexture, "assets/vulpes.qoi");
-	// bool succ = DgTextureGenerateTiles(&foxTexture);
 	
 	if (!succ) {
 		DgLog(DG_LOG_ERROR, "foxy fail 3:");
 		return DG_ERROR_FAILED;
 	}
 	
-	RoUploadTexture(&this->roc, "fox", &foxTexture, 0);
+	this->fox = ZnUploadTexture(&this->roc, &foxTexture, 0);
+	
+	if (!this->fox) {
+		DgLog(DG_LOG_ERROR, "mega foxy fail 3:");
+		return DG_ERROR_FAILED;
+	}
 	
 	DgTextureFree(&foxTexture);
 	
@@ -56,23 +60,15 @@ DgError EngineRun(Engine *this) {
 		DgVec2I pos = DgWindowGetMouseLocation(&this->window);
 		DgVec2I wsize = DgWindowGetSize(&this->window);
 		
-		RoDrawBegin(&this->roc);
+		ZnDrawBegin(&this->roc);
 		
-// 		float t = 2.0 * DgSin(0.25 * start);
-// 		
-// 		RoVertex verts[] = {
-// 			(RoVertex) {-0.5 * t,  0.5 * t, 1.0, 0.0, 0.0, 255, 0, 0, 255},
-// 			(RoVertex) { 0.5 * t,  0.5 * t, 1.0, 0.0, 1.0, 0, 255, 0, 255},
-// 			(RoVertex) { 0.0 * t, -0.5 * t, 1.0, 1.0, 0.0, 0, 0, 255, 255},
-// 		};
-		
-		if ((err = RoDrawRect(&this->roc, 
-			(DgVec2){2.0 * (pos.x/(float)wsize.x) - 1.0, -2.0 * (pos.y/(float)wsize.y) + 1.0},
-			(DgVec2){0.5, 0.5 * ((float)wsize.x/(float)wsize.y)}, "fox"))) {
+		if ((err = ZnDrawRect(&this->roc, 
+			(DgVec2){-100.0f, -100.0f},
+			(DgVec2){ 100.0f,  100.0f}, this->fox))) {
 			DgLog(DG_LOG_ERROR, "Error while adding verts: %s.", DgErrorString(err));
 		}
 		
-		if ((err = RoDrawEnd(&this->roc))) {
+		if ((err = ZnDrawEnd(&this->roc))) {
 			DgLog(DG_LOG_ERROR, "Error while finishing draw: %s.", DgErrorString(err));
 		}
 		
@@ -87,8 +83,6 @@ DgError EngineRun(Engine *this) {
 		double delta = (DgTime() - start);
 		double sleeptime = (1.0/60.0) - delta;
 		
-		// DgLog(DG_LOG_INFO, "Frame %d took %g ms, will sleep for %g ms", this->frames, 1000.0 * delta, 1000.0 * sleeptime);
-		
 		DgSleep(sleeptime);
 	}
 	
@@ -96,8 +90,35 @@ DgError EngineRun(Engine *this) {
 }
 
 int EngineFree(Engine *this) {
-	RoContextDestroy(&this->roc);
+	ZnContextDestroy(&this->roc);
 	DgWindowFree(&this->window);
 	
 	return 0;
+}
+
+int main(int argc, const char *argv[]) {
+	DgError err;
+	DgArgs args;
+	
+	if ((err = DgArgParse(&args, argc, argv))) {
+		return 0x01;
+	}
+	
+	gEngine = DgMemoryAllocate(sizeof *gEngine);
+	
+	if ((err = EngineInit(gEngine, &args))) {
+		DgMemoryFree(gEngine);
+		return 0x10;
+	}
+	
+	if ((err = EngineRun(gEngine))) {
+		DgMemoryFree(gEngine);
+		return 0x20;
+	}
+	
+	int ret = EngineFree(gEngine);
+	
+	DgMemoryFree(gEngine);
+	
+	return ret;
 }
