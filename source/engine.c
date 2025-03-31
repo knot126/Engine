@@ -63,8 +63,8 @@ DgError EngineRun(Engine *this) {
 		ZnDrawBegin(&this->roc);
 		
 		if ((err = ZnDrawRect(&this->roc, 
-			(DgVec2){-100.0f, -100.0f},
-			(DgVec2){ 100.0f,  100.0f}, this->fox))) {
+			(DgVec2){ 640.0f,  360.0f},
+			(DgVec2){ 600.0f,  600.0f}, this->fox))) {
 			DgLog(DG_LOG_ERROR, "Error while adding verts: %s.", DgErrorString(err));
 		}
 		

@@ -9,7 +9,8 @@ attribute vec2 inTextureCoords;
 attribute vec4 inColour;
 
 void main() {
-	gl_Position = vec4(inPosition / (0.5 * vec3(gScreenSize, 0.0)), 1.0);
+	vec2 pointPos = (2.0 * (inPosition.xy / gScreenSize)) - vec2(1.0, 1.0);
+	gl_Position = vec4(pointPos, 1.0, 1.0);
 	fTextureCoords = inTextureCoords;
 	fColour = inColour;
 }
